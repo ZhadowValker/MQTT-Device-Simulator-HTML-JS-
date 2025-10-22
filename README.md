@@ -21,7 +21,7 @@ This single HTML file allows you to **connect, publish, subscribe, and visualize
 
 ## 🧩 How to Use
 
-1. **Open** the `Mqtt Publisher Device Simulator.html` file in your browser or upload it to [CodePen](https://codepen.io).  
+1. **Open** the `Mqtt Publisher Device Simulator.html` file in your browser or upload it to [CodePen](https://codepen.io/zhadowvalker/full/MYKomVN).  
 2. **Configure your MQTT broker:**
    - 🖥️ **Host:** e.g. `broker.hivemq.com`
    - ⚙️ **Port:** `8883` for `wss`, or `8083` for `ws`
