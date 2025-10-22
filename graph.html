@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Device Metrics Graph</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- Chart.js for graphs -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root{--bg:#f6f7fb;--card:#fff;--muted:#6b7280}
+    body{font-family:Inter,Segoe UI,Arial;background:var(--bg);margin:0;padding:24px;display:flex;justify-content:center}
+    .app{width:100%;max-width:920px}
+    .card{background:var(--card);border-radius:10px;padding:18px;box-shadow:0 6px 22px rgba(15,23,42,0.08);border:1px solid rgba(0,0,0,0.04);margin-bottom:20px}
+    h1{margin:0 0 10px;font-size:20px}
+    .muted{color:var(--muted);font-size:13px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    input,select,button{padding:8px 10px;border-radius:6px;border:1px solid #d1d5db;font-size:14px}
+    button{cursor:pointer;background:#111827;color:#fff;border:none}
+    button.secondary{background:#efefef;color:#111}
+    .controls {display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    label{font-size:13px;color:#374151}
+    canvas{margin-top:12px;max-width:100%;height:300px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Device Selector Card -->
+    <div class="card">
+      <h1>Select Device</h1>
+      <div class="muted">Choose a device to view its metrics.</div>
+      <div class="row">
+        <label>Device ID</label>
+        <select id="deviceSelector">
+          <option value="">Select Device</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- All Metrics Line Card -->
+    <div class="card">
+      <h1>All Metrics (Line)</h1>
+      <div class="muted">Dual-axis line chart for temperature and humidity for device: <span id="deviceDisplay">None</span></div>
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="controls">
+          <button id="graphAllBtn" class="secondary">📊 Generate Chart</button>
+        </div>
+      </div>
+      <canvas id="allMetricsChart"></canvas>
+    </div>
+
+    <!-- Temperature Line Card -->
+    <div class="card">
+      <h1>Temperature (Line)</h1>
+      <div class="muted">Line chart for temperature.</div>
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="controls">
+          <button id="graphTempLineBtn" class="secondary">📈 Generate Chart</button>
+        </div>
+      </div>
+      <canvas id="tempLineChart"></canvas>
+    </div>
+
+    <!-- Humidity Line Card -->
+    <div class="card">
+      <h1>Humidity (Line)</h1>
+      <div class="muted">Line chart for humidity.</div>
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="controls">
+          <button id="graphHumLineBtn" class="secondary">📈 Generate Chart</button>
+        </div>
+      </div>
+      <canvas id="humLineChart"></canvas>
+    </div>
+
+    <!-- Temperature Bar Card -->
+    <div class="card">
+      <h1>Temperature (Bar)</h1>
+      <div class="muted">Bar chart for temperature.</div>
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="controls">
+          <button id="graphTempBarBtn" class="secondary">📊 Generate Chart</button>
+        </div>
+      </div>
+      <canvas id="tempBarChart"></canvas>
+    </div>
+
+    <!-- Humidity Bar Card -->
+    <div class="card">
+      <h1>Humidity (Bar)</h1>
+      <div class="muted">Bar chart for humidity.</div>
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="controls">
+          <button id="graphHumBarBtn" class="secondary">📊 Generate Chart</button>
+        </div>
+      </div>
+      <canvas id="humBarChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const deviceSelector = document.getElementById('deviceSelector');
+      const graphAllBtn = document.getElementById('graphAllBtn');
+      const graphTempLineBtn = document.getElementById('graphTempLineBtn');
+      const graphHumLineBtn = document.getElementById('graphHumLineBtn');
+      const graphTempBarBtn = document.getElementById('graphTempBarBtn');
+      const graphHumBarBtn = document.getElementById('graphHumBarBtn');
+      const deviceDisplay = document.getElementById('deviceDisplay');
+
+      const allMetricsCanvas = document.getElementById('allMetricsChart').getContext('2d');
+      const tempLineCanvas = document.getElementById('tempLineChart').getContext('2d');
+      const humLineCanvas = document.getElementById('humLineChart').getContext('2d');
+      const tempBarCanvas = document.getElementById('tempBarChart').getContext('2d');
+      const humBarCanvas = document.getElementById('humBarChart').getContext('2d');
+
+      let deviceData = {};
+      let charts = {}; // Store chart instances for updates
+      let currentDeviceId = null;
+
+      // Function to load data from localStorage
+      function loadData() {
+        const storedData = localStorage.getItem('mqttDeviceData');
+        if (storedData) {
+          try {
+            deviceData = JSON.parse(storedData);
+            // Convert timestamp strings back to Date objects
+            for (const devId in deviceData) {
+              deviceData[devId] = deviceData[devId].map(d => ({
+                ...d,
+                timestamp: new Date(d.timestamp)
+              }));
+            }
+          } catch (e) {
+            console.error('Error parsing stored data:', e);
+          }
+        }
+        updateDeviceSelector();
+      }
+
+      // Function to update device selector
+      function updateDeviceSelector() {
+        const devices = Object.keys(deviceData);
+        deviceSelector.innerHTML = '<option value="">Select Device</option>';
+        devices.forEach(devId => {
+          const option = document.createElement('option');
+          option.value = devId;
+          option.textContent = devId;
+          deviceSelector.appendChild(option);
+        });
+        // Set current device if available
+        if (currentDeviceId && devices.includes(currentDeviceId)) {
+          deviceSelector.value = currentDeviceId;
+        }
+      }
+
+      // Function to update all active charts
+      function updateCharts() {
+        if (!currentDeviceId) return;
+        loadData();
+        const data = deviceData[currentDeviceId];
+        if (!data || data.length === 0) return;
+        const labels = data.map(d => d.timestamp.toLocaleTimeString());
+
+        if (charts.all && charts.all.update) {
+          charts.all.data.labels = labels;
+          charts.all.data.datasets[0].data = data.map(d => d.temperature);
+          charts.all.data.datasets[1].data = data.map(d => d.humidity);
+          charts.all.update();
+        }
+        if (charts.tempLine && charts.tempLine.update) {
+          charts.tempLine.data.labels = labels;
+          charts.tempLine.data.datasets[0].data = data.map(d => d.temperature);
+          charts.tempLine.update();
+        }
+        if (charts.humLine && charts.humLine.update) {
+          charts.humLine.data.labels = labels;
+          charts.humLine.data.datasets[0].data = data.map(d => d.humidity);
+          charts.humLine.update();
+        }
+        if (charts.tempBar && charts.tempBar.update) {
+          charts.tempBar.data.labels = labels;
+          charts.tempBar.data.datasets[0].data = data.map(d => d.temperature);
+          charts.tempBar.update();
+        }
+        if (charts.humBar && charts.humBar.update) {
+          charts.humBar.data.labels = labels;
+          charts.humBar.data.datasets[0].data = data.map(d => d.humidity);
+          charts.humBar.update();
+        }
+      }
+
+      // Initial load
+      loadData();
+
+      // Poll for updates every 5 seconds
+      setInterval(updateCharts, 5000);
+
+      // Device selector change
+      deviceSelector.addEventListener('change', () => {
+        currentDeviceId = deviceSelector.value;
+        deviceDisplay.textContent = currentDeviceId || 'None';
+        // Clear all charts when device changes
+        Object.values(charts).forEach(chart => chart && chart.destroy());
+        charts = {};
+      });
+
+      // Graph buttons
+      graphAllBtn.addEventListener('click', () => {
+        if (!currentDeviceId) {
+          alert('Please select a device first.');
+          return;
+        }
+        loadData();
+        const data = deviceData[currentDeviceId];
+        if (!data || data.length === 0) {
+          alert('No data available for device ' + currentDeviceId);
+          return;
+        }
+        const labels = data.map(d => d.timestamp.toLocaleTimeString());
+        const temps = data.map(d => d.temperature);
+        const hums = data.map(d => d.humidity);
+        if (charts.all) charts.all.destroy();
+        charts.all = new Chart(allMetricsCanvas, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Temperature (°C)',
+              data: temps,
+              borderColor: 'rgba(255, 99, 132, 1)',
+              backgroundColor: 'rgba(255, 99, 132, 0.2)',
+              fill: false,
+              yAxisID: 'y'
+            }, {
+              label: 'Humidity (%)',
+              data: hums,
+              borderColor: 'rgba(54, 162, 235, 1)',
+              backgroundColor: 'rgba(54, 162, 235, 0.2)',
+              fill: false,
+              yAxisID: 'y1'
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { display: true, title: { display: true, text: 'Time' } },
+              y: {
+                type: 'linear',
+                display: true,
+                position: 'left',
+                title: { display: true, text: 'Temperature (°C)' }
+              },
+              y1: {
+                type: 'linear',
+                display: true,
+                position: 'right',
+                title: { display: true, text: 'Humidity (%)' },
+                grid: { drawOnChartArea: false }
+              }
+            }
+          }
+        });
+      });
+
+      graphTempLineBtn.addEventListener('click', () => {
+        if (!currentDeviceId) {
+          alert('Please select a device first.');
+          return;
+        }
+        loadData();
+        const data = deviceData[currentDeviceId];
+        if (!data || data.length === 0) {
+          alert('No data available for device ' + currentDeviceId);
+          return;
+        }
+        const labels = data.map(d => d.timestamp.toLocaleTimeString());
+        const temps = data.map(d => d.temperature);
+        if (charts.tempLine) charts.tempLine.destroy();
+        charts.tempLine = new Chart(tempLineCanvas, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Temperature (°C)',
+              data: temps,
+              borderColor: 'rgba(255, 99, 132, 1)',
+              backgroundColor: 'rgba(255, 99, 132, 0.2)',
+              fill: false
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { display: true, title: { display: true, text: 'Time' } },
+              y: { display: true, title: { display: true, text: 'Temperature (°C)' } }
+            }
+          }
+        });
+      });
+
+      graphHumLineBtn.addEventListener('click', () => {
+        if (!currentDeviceId) {
+          alert('Please select a device first.');
+          return;
+        }
+        loadData();
+        const data = deviceData[currentDeviceId];
+        if (!data || data.length === 0) {
+          alert('No data available for device ' + currentDeviceId);
+          return;
+        }
+        const labels = data.map(d => d.timestamp.toLocaleTimeString());
+        const hums = data.map(d => d.humidity);
+        if (charts.humLine) charts.humLine.destroy();
+        charts.humLine = new Chart(humLineCanvas, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Humidity (%)',
+              data: hums,
+              borderColor: 'rgba(54, 162, 235, 1)',
+              backgroundColor: 'rgba(54, 162, 235, 0.2)',
+              fill: false
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { display: true, title: { display: true, text: 'Time' } },
+              y: { display: true, title: { display: true, text: 'Humidity (%)' } }
+            }
+          }
+        });
+      });
+
+      graphTempBarBtn.addEventListener('click', () => {
+        if (!currentDeviceId) {
+          alert('Please select a device first.');
+          return;
+        }
+        loadData();
+        const data = deviceData[currentDeviceId];
+        if (!data || data.length === 0) {
+          alert('No data available for device ' + currentDeviceId);
+          return;
+        }
+        const labels = data.map(d => d.timestamp.toLocaleTimeString());
+        const temps = data.map(d => d.temperature);
+        if (charts.tempBar) charts.tempBar.destroy();
+        charts.tempBar = new Chart(tempBarCanvas, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Temperature (°C)',
+              data: temps,
+              backgroundColor: 'rgba(255, 99, 132, 0.6)',
+              borderColor: 'rgba(255, 99, 132, 1)',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { display: true, title: { display: true, text: 'Time' } },
+              y: { display: true, title: { display: true, text: 'Temperature (°C)' } }
+            }
+          }
+        });
+      });
+
+      graphHumBarBtn.addEventListener('click', () => {
+        if (!currentDeviceId) {
+          alert('Please select a device first.');
+          return;
+        }
+        loadData();
+        const data = deviceData[currentDeviceId];
+        if (!data || data.length === 0) {
+          alert('No data available for device ' + currentDeviceId);
+          return;
+        }
+        const labels = data.map(d => d.timestamp.toLocaleTimeString());
+        const hums = data.map(d => d.humidity);
+        if (charts.humBar) charts.humBar.destroy();
+        charts.humBar = new Chart(humBarCanvas, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Humidity (%)',
+              data: hums,
+              backgroundColor: 'rgba(54, 162, 235, 0.6)',
+              borderColor: 'rgba(54, 162, 235, 1)',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { display: true, title: { display: true, text: 'Time' } },
+              y: { display: true, title: { display: true, text: 'Humidity (%)' } }
+            }
+          }
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

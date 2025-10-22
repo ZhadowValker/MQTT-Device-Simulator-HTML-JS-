@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MQTT Device Simulator — Single File (CodePen)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- Paho WebSocket (using the specified URL) -->
+  <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
+  <style>
+    :root{--bg:#f6f7fb;--card:#fff;--muted:#6b7280}
+    body{font-family:Inter,Segoe UI,Arial;background:var(--bg);margin:0;padding:24px;display:flex;justify-content:center}
+    .app{width:100%;max-width:920px}
+    .card{background:var(--card);border-radius:10px;padding:18px;box-shadow:0 6px 22px rgba(15,23,42,0.08);border:1px solid rgba(0,0,0,0.04);margin-bottom:20px}
+    h1{margin:0 0 10px;font-size:20px}
+    .muted{color:var(--muted);font-size:13px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    input,select,button{padding:8px 10px;border-radius:6px;border:1px solid #d1d5db;font-size:14px}
+    button{cursor:pointer;background:#111827;color:#fff;border:none}
+    button.secondary{background:#efefef;color:#111}
+    .log{margin-top:12px;background:#0f172a;color:#f8fafc;padding:12px;border-radius:8px;min-height:120px;max-height:200px;font-family:monospace;font-size:13px;overflow-y:scroll}
+    .small{font-size:13px}
+    .controls {display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .chip{background:#eef2ff;padding:6px 10px;border-radius:999px;font-size:13px;color:#1e3a8a}
+    label{font-size:13px;color:#374151}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Connection Card -->
+    <div class="card">
+      <h1>MQTT Connection</h1>
+      <div class="muted">Broker defaults filled — change if needed. Use <strong>wss</strong> with port <strong>8883</strong> for TLS websockets.</div>
+
+      <div class="row">
+        <label>Host</label>
+        <input id="host" value="192.168.0.10" />
+        <label>Port</label>
+        <input id="port" value="8883" style="width:92px" />
+        <label>Protocol</label>
+        <select id="protocol">
+          <option value="wss">wss</option>
+          <option value="ws">ws</option>
+        </select>
+
+        <label>Path</label>
+        <input id="path" value="/mqtt" style="width:110px" />
+      </div>
+
+      <div class="row">
+        <label>Username</label>
+        <input id="username" value="iot" />
+        <label>Password</label>
+        <input id="password" value="iot" />
+      </div>
+
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="controls">
+          <button id="connectBtn">🔌 Connect</button>
+          <button id="disconnectBtn" class="secondary" disabled>❌ Disconnect</button>
+        </div>
+        <div class="chip" id="status" style="margin-left:auto">Disconnected</div>
+      </div>
+    </div>
+
+    <!-- Publish Card -->
+    <div class="card">
+      <h1>Publish Messages</h1>
+      <div class="muted">Send simulated device data to a topic.</div>
+
+      <div class="row">
+        <label>Topic</label>
+        <input id="pubTopic" value="devices/data" style="width:220px" />
+        <label>Device ID</label>
+        <input id="deviceId" value="device001" style="width:160px" />
+        <label>Temperature</label>
+        <input id="temperature" value="25.4" style="width:110px" />
+        <label>Humidity</label>
+        <input id="humidity" value="45" style="width:110px" />
+      </div>
+
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="controls">
+          <button id="sendBtn" class="secondary" disabled>📡 Send</button>
+          <button id="autoBtn" class="secondary" disabled>🚀 Start Auto</button>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;gap:12px;align-items:center">
+        <div class="muted">Publish Logs:</div>
+      </div>
+      <div id="pubLog" class="log"></div>
+    </div>
+
+    <!-- Subscribe Card -->
+    <div class="card">
+      <h1>Subscribe to Topics</h1>
+      <div class="muted">Receive messages from a topic.</div>
+
+      <div class="row">
+        <label>Topic</label>
+        <input id="subTopic" value="devices/data" style="width:220px" />
+      </div>
+
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="controls">
+          <button id="subscribeBtn" class="secondary" disabled>📥 Subscribe</button>
+          <button id="unsubscribeBtn" class="secondary" disabled>📤 Unsubscribe</button>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;gap:12px;align-items:center">
+        <div class="muted">Subscribe Logs:</div>
+      </div>
+      <div id="subLog" class="log"></div>
+    </div>
+
+    <!-- Graph Card -->
+    <div class="card">
+      <h1>Device Metrics Graph</h1>
+      <div class="muted">Select a device ID and open graphs in a new tab.</div>
+
+      <div class="row">
+        <label>Device ID</label>
+        <input id="graphDeviceId" value="device001" style="width:160px" />
+      </div>
+
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="controls">
+          <button id="openGraphBtn" class="secondary">📊 Open Graph in New Tab</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Basic MQTT Device Simulator using Paho (adapted for the specified library URL)
+    (function () {
+      const connectBtn = document.getElementById('connectBtn');
+      const disconnectBtn = document.getElementById('disconnectBtn');
+      const sendBtn = document.getElementById('sendBtn');
+      const autoBtn = document.getElementById('autoBtn');
+      const subscribeBtn = document.getElementById('subscribeBtn');
+      const unsubscribeBtn = document.getElementById('unsubscribeBtn');
+      const openGraphBtn = document.getElementById('openGraphBtn');
+      const pubLogEl = document.getElementById('pubLog');
+      const subLogEl = document.getElementById('subLog');
+      const statusChip = document.getElementById('status');
+
+      let client = null;
+      let autoInterval = null;
+      let deviceData = {}; // {deviceId: [{timestamp, temperature, humidity}, ...]}
+
+      function log(msg, level = 'info', isPub = true) {
+        const time = new Date().toLocaleTimeString();
+        const line = document.createElement('div');
+        line.textContent = `${time} - ${msg}`;
+        if (level === 'err') line.style.color = '#fecaca';
+        const logEl = isPub ? pubLogEl : subLogEl;
+        logEl.appendChild(line);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function setStatus(text, ok = false) {
+        statusChip.textContent = text;
+        statusChip.style.background = ok ? '#dcfce7' : '#fee2e2';
+        statusChip.style.color = ok ? '#065f46' : '#991b1b';
+      }
+
+      function getForm() {
+        return {
+          host: document.getElementById('host').value.trim(),
+          port: Number(document.getElementById('port').value),
+          protocol: document.getElementById('protocol').value,
+          path: document.getElementById('path').value || '/mqtt',
+          username: document.getElementById('username').value,
+          password: document.getElementById('password').value,
+          pubTopic: document.getElementById('pubTopic').value.trim(),
+          subTopic: document.getElementById('subTopic').value.trim(),
+          deviceId: document.getElementById('deviceId').value || 'device001',
+          temperature: document.getElementById('temperature').value,
+          humidity: document.getElementById('humidity').value,
+          graphDeviceId: document.getElementById('graphDeviceId').value.trim()
+        };
+      }
+
+      function enableControls(connected) {
+        disconnectBtn.disabled = !connected;
+        sendBtn.disabled = !connected;
+        autoBtn.disabled = !connected;
+        subscribeBtn.disabled = !connected;
+        unsubscribeBtn.disabled = !connected;
+        connectBtn.disabled = connected;
+      }
+
+      connectBtn.addEventListener('click', async () => {
+        const f = getForm();
+
+        // ensure Paho loaded (checking for window.Paho as the global)
+        if (!window.Paho) {
+          log('Paho MQTT library not loaded — unable to connect', 'err');
+          return;
+        }
+
+        const clientId = 'websim_' + Math.random().toString(16).slice(2,10);
+        log(`Connecting to ${f.protocol}://${f.host}:${f.port}${f.path} as ${clientId}...`, 'info', false);
+
+        try {
+          // Assuming the library exposes Paho.Client (similar to older versions)
+          client = new Paho.Client(f.host, f.port, f.path, clientId);
+
+          client.onConnectionLost = function (responseObject) {
+            log('⚠️ Connection lost: ' + (responseObject.errorMessage || JSON.stringify(responseObject)), 'err', false);
+            setStatus('Disconnected', false);
+            enableControls(false);
+            if (autoInterval) { clearInterval(autoInterval); autoInterval = null; autoBtn.textContent = '🚀 Start Auto'; }
+          };
+
+          client.onMessageArrived = function (message) {
+            log('📥 Received on ' + message.destinationName + ' : ' + message.payloadString, 'info', false);
+            // Parse and store data for graphing
+            try {
+              const data = JSON.parse(message.payloadString);
+              if (data.deviceId && data.temperature !== undefined && data.humidity !== undefined && data.timestamp) {
+                if (!deviceData[data.deviceId]) deviceData[data.deviceId] = [];
+                deviceData[data.deviceId].push({
+                  timestamp: new Date(data.timestamp),
+                  temperature: parseFloat(data.temperature),
+                  humidity: parseFloat(data.humidity)
+                });
+                // Keep only last 100 points per device
+                if (deviceData[data.deviceId].length > 100) deviceData[data.deviceId].shift();
+                // Store in localStorage for the graph page
+                localStorage.setItem('mqttDeviceData', JSON.stringify(deviceData));
+              }
+            } catch (e) {
+              // Ignore invalid JSON
+            }
+          };
+
+          client.connect({
+            useSSL: f.protocol === 'wss' ? true : false,
+            userName: f.username || undefined,
+            password: f.password || undefined,
+            onSuccess: function () {
+              log('✅ Connected successfully', 'info', false);
+              setStatus('Connected', true);
+              enableControls(true);
+            },
+            onFailure: function (err) {
+              log('❌ Connection failed: ' + (err.errorMessage || JSON.stringify(err)), 'err', false);
+              setStatus('Disconnected', false);
+              enableControls(false);
+            }
+          });
+        } catch (ex) {
+          log('❌ Connect exception: ' + ex.message, 'err', false);
+          setStatus('Disconnected', false);
+        }
+      });
+
+      disconnectBtn.addEventListener('click', () => {
+        if (!client) return;
+        try {
+          client.disconnect();
+          log('🔌 Disconnected', 'info', false);
+          setStatus('Disconnected', false);
+          enableControls(false);
+          if (autoInterval) { clearInterval(autoInterval); autoInterval = null; autoBtn.textContent = '🚀 Start Auto'; }
+        } catch (e) {
+          log('Disconnect error: ' + e.message, 'err', false);
+        }
+      });
+
+      sendBtn.addEventListener('click', () => {
+        const f = getForm();
+        if (!client) { log('Not connected', 'err'); return; }
+        const payload = {
+          deviceId: f.deviceId,
+          temperature: parseFloat(f.temperature),
+          humidity: parseFloat(f.humidity),
+          timestamp: new Date().toISOString()
+        };
+        try {
+          const msg = new Paho.Message(JSON.stringify(payload));
+          msg.destinationName = f.pubTopic;
+          client.send(msg);
+          log('📤 Sent: ' + JSON.stringify(payload));
+        } catch (err) {
+          log('Send error: ' + err.message, 'err');
+        }
+      });
+
+      autoBtn.addEventListener('click', () => {
+        if (!client) { log('Not connected', 'err'); return; }
+        if (!autoInterval) {
+          autoBtn.textContent = '🛑 Stop Auto';
+          // send immediately and then every 5s
+          (function sendAutoOnce() {
+            const f = getForm();
+            const payload = {
+              deviceId: f.deviceId,
+              temperature: Number((20 + Math.random() * 12).toFixed(2)),
+              humidity: Number((35 + Math.random() * 25).toFixed(1)),
+              timestamp: new Date().toISOString()
+            };
+            try {
+              const msg = new Paho.Message(JSON.stringify(payload));
+              msg.destinationName = f.pubTopic;
+              client.send(msg);
+              log('🤖 Auto Sent: ' + JSON.stringify(payload));
+            } catch (err) {
+              log('Auto send error: ' + err.message, 'err');
+            }
+          })();
+          autoInterval = setInterval(() => {
+            // guard if disconnected
+            if (!client || !client.isConnected()) { clearInterval(autoInterval); autoInterval = null; autoBtn.textContent = '🚀 Start Auto'; return; }
+            const f = getForm();
+            const payload = {
+              deviceId: f.deviceId,
+              temperature: Number((20 + Math.random() * 12).toFixed(2)),
+              humidity: Number((35 + Math.random() * 25).toFixed(1)),
+              timestamp: new Date().toISOString()
+            };
+            try {
+              const msg = new Paho.Message(JSON.stringify(payload));
+              msg.destinationName = f.pubTopic;
+              client.send(msg);
+              log('🤖 Auto Sent: ' + JSON.stringify(payload));
+            } catch (err) {
+              log('Auto send error: ' + err.message, 'err');
+            }
+          }, 5000);
+        } else {
+          clearInterval(autoInterval);
+          autoInterval = null;
+          autoBtn.textContent = '🚀 Start Auto';
+          log('🛑 Auto simulation stopped');
+        }
+      });
+
+      subscribeBtn.addEventListener('click', () => {
+        const f = getForm();
+        if (!client) { log('Not connected', 'err', false); return; }
+        try {
+          client.subscribe(f.subTopic);
+          log('Subscribed to ' + f.subTopic, 'info', false);
+        } catch (err) {
+          log('Subscribe error: ' + err.message, 'err', false);
+        }
+      });
+
+      unsubscribeBtn.addEventListener('click', () => {
+        const f = getForm();
+        if (!client) { log('Not connected', 'err', false); return; }
+        try {
+          client.unsubscribe(f.subTopic);
+          log('Unsubscribed from ' + f.subTopic, 'info', false);
+        } catch (err) {
+          log('Unsubscribe error: ' + err.message, 'err', false);
+        }
+      });
+
+      openGraphBtn.addEventListener('click', () => {
+        const f = getForm();
+        window.open(`graph.html?device=${encodeURIComponent(f.graphDeviceId)}`, '_blank');
+      });
+
+      // initialize UI state
+      setStatus('Disconnected', false);
+      enableControls(false);
+      log('UI ready. Change host/port/protocol as needed and press Connect.', 'info', false);
+      // small helpful note: if you open the console and see TLS/certificate errors, your broker needs valid cert for wss.
+    })();
+  </script>
