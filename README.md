@@ -4,7 +4,7 @@
 
 A lightweight, browser-based MQTT device simulator built using the **Paho MQTT JavaScript client**.  
 This single HTML file allows you to **connect, publish, subscribe, and visualize simulated IoT device data** — perfect for testing brokers, MQTT payloads, or IoT dashboards.
-
+ ## Demo: https://zhadowvalker.github.io/MQTT-Device-Simulator-HTML-JS-/Mqtt%20Publisher%20Device%20Simulator.html
 ---
 
 ## 🚀 Features
